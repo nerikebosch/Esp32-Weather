@@ -6,7 +6,7 @@ plugins {
 android {
     namespace = "com.example.esp32_weather"
     compileSdk {
-        version = release(37)
+        version = release(36)
     }
 
     defaultConfig {
@@ -33,6 +33,7 @@ android {
     buildFeatures {
         compose = true
     }
+    buildToolsVersion = "36.1.0"
 }
 
 dependencies {
