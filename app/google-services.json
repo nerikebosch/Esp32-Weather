@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "489146883338",
+    "project_id": "esp32-weather-f6baa",
+    "storage_bucket": "esp32-weather-f6baa.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:489146883338:android:26373dab140e9f96aeeef3",
+        "android_client_info": {
+          "package_name": "com.example.esp32_weather"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBZKPeeSe_sLO2LtF0Sh3xQwRef9SZFvGw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
