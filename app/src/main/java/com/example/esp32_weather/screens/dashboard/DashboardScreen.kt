@@ -34,7 +34,11 @@ fun DashboardScreen(viewModel: WeatherViewModel) {
             Text("Waiting for ESP32 data...", modifier = Modifier.padding(top = 16.dp))
         } else {
             // Hero Card (Live Temperature)
-            HeroCard(temperature = current!!.temperature, lux = current!!.lux)
+            HeroCard(
+                temperature = current!!.temperature,
+                lux = current!!.lux,
+                timestamp = current!!.timestamp
+            )
 
             Spacer(modifier = Modifier.height(24.dp))
 
@@ -53,12 +57,11 @@ fun DashboardScreen(viewModel: WeatherViewModel) {
 }
 
 @Composable
-fun HeroCard(temperature: Float, lux: Float) {
-    // Dynamic background: Dark blue for low light (night), bright orange/yellow for high light (day)
+fun HeroCard(temperature: Float, lux: Float, timestamp: Long) {
     val bgColors = if (lux > 500f) {
-        listOf(Color(0xFFFF9800), Color(0xFFFFC107)) // Daytime
+        listOf(Color(0xFFFF9800), Color(0xFFFFC107))
     } else {
-        listOf(Color(0xFF1A237E), Color(0xFF3949AB)) // Nighttime
+        listOf(Color(0xFF1A237E), Color(0xFF3949AB))
     }
 
     Card(
@@ -86,8 +89,10 @@ fun HeroCard(temperature: Float, lux: Float) {
                     fontSize = 72.sp,
                     fontWeight = FontWeight.Bold
                 )
+
+                // 2. Use the timestamp here!
                 Text(
-                    text = "Updated just ${TimeFormatter.formatTimestamp(current!!.timestamp)}",
+                    text = "Updated at ${TimeFormatter.formatTimestamp(timestamp)}",
                     color = Color.White.copy(alpha = 0.6f),
                     fontSize = 14.sp
                 )

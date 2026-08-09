@@ -17,9 +17,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.example.esp32_weather.ui.screens.DashboardScreen
-import com.example.esp32_weather.ui.screens.HistoryScreen
-import com.example.esp32_weather.ui.viewmodel.WeatherViewModel
+import com.example.esp32_weather.screens.dashboard.DashboardScreen
+import com.example.esp32_weather.screens.history.HistoryScreen
+import com.example.esp32_weather.viewmodel.WeatherViewModel
 
 class WeatherApplication : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

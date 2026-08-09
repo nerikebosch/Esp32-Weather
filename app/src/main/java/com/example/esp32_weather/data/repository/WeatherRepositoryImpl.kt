@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 
 class WeatherRepositoryImpl(
-    private val database: FirebaseDatabase = FirebaseDatabase.getInstance()
+    private val database: FirebaseDatabase = FirebaseDatabase.getInstance("https://esp32-weather-f6baa-default-rtdb.europe-west1.firebasedatabase.app")
 ) : WeatherRepository {
 
     override fun getLiveWeather(): Flow<CurrentWeather?> = callbackFlow {
