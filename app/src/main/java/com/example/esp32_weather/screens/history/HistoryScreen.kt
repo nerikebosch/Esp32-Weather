@@ -9,9 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -27,12 +25,21 @@ import com.example.esp32_weather.viewmodel.WeatherViewModel
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
+enum class GraphMetric(val label: String, val unit: String, val color: Color) {
+    TEMPERATURE("Temp", "°C", Color(0xFFFF7043)),
+    HUMIDITY("Humidity", "%", Color(0xFF29B6F6)),
+    PRESSURE("Pressure", "hPa", Color(0xFFAB47BC)),
+    LUX("Light", "lx", Color(0xFFFFCA28))
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(viewModel: WeatherViewModel) {
     val historyList by viewModel.selectedDateHistory.collectAsState()
     val selectedDate by viewModel.selectedDate.collectAsState()
 
-    // Format the date (e.g., "Aug 09, 2026")
+    var selectedMetric by remember { mutableStateOf(GraphMetric.TEMPERATURE) }
+
     val dateDisplay = selectedDate.format(DateTimeFormatter.ofPattern("MMM dd, yyyy"))
     val isToday = selectedDate.isEqual(LocalDate.now())
 
@@ -41,7 +48,7 @@ fun HistoryScreen(viewModel: WeatherViewModel) {
             .fillMaxSize()
             .padding(horizontal = 16.dp)
     ) {
-        // --- Header with Date Navigation Arrows ---
+        // --- Header with Date Navigation ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -59,7 +66,6 @@ fun HistoryScreen(viewModel: WeatherViewModel) {
                 fontWeight = FontWeight.Bold
             )
 
-            // Disable the right arrow if we are already on "Today"
             IconButton(
                 onClick = { viewModel.nextDay() },
                 enabled = !isToday
@@ -77,46 +83,63 @@ fun HistoryScreen(viewModel: WeatherViewModel) {
                 Text("No data recorded for this date.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
-
-            // --- The Graph Section with Axes ---
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(240.dp) // Made slightly taller for labels
-                    .padding(bottom = 16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                shape = RoundedCornerShape(16.dp)
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(bottom = 24.dp)
             ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(
-                        text = "Temperature (°C)",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                // 1. Daily Highlights Summary Card
+                item {
+                    DailyHighlightsSummary(historyList)
+                }
 
-                    if (historyList.size < 2) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("Need at least 2 hours of data.")
+                // 2. Interactive Graph with Metric Chips
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(290.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            // Filter Chips Row
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                GraphMetric.values().forEach { metric ->
+                                    FilterChip(
+                                        selected = selectedMetric == metric,
+                                        onClick = { selectedMetric = metric },
+                                        label = { Text(metric.label, fontSize = 12.sp) }
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            if (historyList.size < 2) {
+                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text("Need at least 2 hours of data to render graph.")
+                                }
+                            } else {
+                                MultiMetricGraph(history = historyList, metric = selectedMetric)
+                            }
                         }
-                    } else {
-                        TemperatureGraphWithAxes(historyList)
                     }
                 }
-            }
 
-            Text(
-                text = "Detailed Log",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
+                // 3. Section Title
+                item {
+                    Text(
+                        text = "Hourly Readings Log",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
 
-            // --- The List Section ---
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = PaddingValues(bottom = 16.dp)
-            ) {
+                // 4. Detailed History List
                 items(historyList.reversed()) { hourData ->
                     HourlyRowItem(hourData)
                 }
@@ -125,38 +148,111 @@ fun HistoryScreen(viewModel: WeatherViewModel) {
     }
 }
 
+// --- Daily Summary Highlights Block ---
 @Composable
-fun TemperatureGraphWithAxes(history: List<HourlyWeather>) {
-    val temperatures = history.map { it.avgTemperature }
-    val maxTemp = temperatures.maxOrNull() ?: 0f
-    val minTemp = temperatures.minOrNull() ?: 0f
+fun DailyHighlightsSummary(history: List<HourlyWeather>) {
+    val minTemp = history.minOfOrNull { it.minTemperature } ?: 0f
+    val maxTemp = history.maxOfOrNull { it.maxTemperature } ?: 0f
+    val tempDelta = maxTemp - minTemp
 
-    val range = (maxTemp - minTemp).coerceAtLeast(1f)
-    val maxGraphY = maxTemp + (range * 0.1f)
-    val minGraphY = minTemp - (range * 0.1f)
+    val peakLuxHour = history.maxByOrNull { it.avgLux }
+    val avgTemp = history.map { it.avgTemperature }.average().toFloat()
+    val avgHum = history.map { it.avgHumidity }.average().toFloat()
+
+    // Pressure Trend (Compare first recorded hour vs last recorded hour)
+    val firstPressure = history.first().avgPressure
+    val lastPressure = history.last().avgPressure
+    val pressureDiff = lastPressure - firstPressure
+    val pressureTrend = when {
+        pressureDiff > 1.0f -> "Rising ⬆ (Fair Weather)"
+        pressureDiff < -1.0f -> "Falling ⬇ (Clouds / Rain)"
+        else -> "Steady ➡"
+    }
+
+    // Comfort Score Logic
+    val comfortLabel = when {
+        avgTemp in 18.0..25.0 && avgHum in 30.0..60.0 -> "Ideal & Comfortable 😊"
+        avgTemp > 28.0 && avgHum > 65.0 -> "Hot & Humid 💦"
+        avgTemp < 15.0 -> "Crisp & Cold ❄"
+        avgHum < 30.0 -> "Dry Air 🌵"
+        else -> "Moderate Weather 🌤"
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("Day Summary", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                SummaryTile(title = "Temp Range", value = "${minTemp.toInt()}° - ${maxTemp.toInt()}°C", subtitle = "Swing: ${String.format("%.1f", tempDelta)}°C")
+                SummaryTile(title = "Pressure Trend", value = pressureTrend.split(" ")[0], subtitle = pressureTrend.substringAfter(" "))
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                SummaryTile(
+                    title = "Peak Sun Hour",
+                    value = peakLuxHour?.timeString?.take(5) ?: "--:--",
+                    subtitle = "${peakLuxHour?.avgLux?.toInt() ?: 0} lx"
+                )
+                SummaryTile(title = "Comfort Index", value = comfortLabel.split(" ").take(2).joinToString(" "), subtitle = comfortLabel)
+            }
+        }
+    }
+}
+
+@Composable
+fun SummaryTile(title: String, value: String, subtitle: String) {
+    Column {
+        Text(title, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(subtitle, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+// --- Dynamic Canvas Multi-Metric Graph ---
+@Composable
+fun MultiMetricGraph(history: List<HourlyWeather>, metric: GraphMetric) {
+    val rawValues = history.map {
+        when (metric) {
+            GraphMetric.TEMPERATURE -> it.avgTemperature
+            GraphMetric.HUMIDITY -> it.avgHumidity
+            GraphMetric.PRESSURE -> it.avgPressure
+            GraphMetric.LUX -> it.avgLux
+        }
+    }
+
+    val maxVal = rawValues.maxOrNull() ?: 0f
+    val minVal = rawValues.minOrNull() ?: 0f
+
+    val range = (maxVal - minVal).coerceAtLeast(0.1f)
+    val maxGraphY = maxVal + (range * 0.1f)
+    val minGraphY = minVal - (range * 0.1f)
     val totalRange = maxGraphY - minGraphY
 
-    val lineColor = MaterialTheme.colorScheme.primary
-    val gradientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+    val lineColor = metric.color
+    val gradientColor = metric.color.copy(alpha = 0.25f)
 
-    // A Box lets us draw the Canvas in the background, and place Text labels on top
     Box(modifier = Modifier.fillMaxSize()) {
-
-        // 1. The Canvas Drawing (Padded to make room for text)
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 32.dp, bottom = 24.dp, top = 8.dp, end = 8.dp)
+                .padding(start = 36.dp, bottom = 24.dp, top = 8.dp, end = 8.dp)
         ) {
             val width = size.width
             val height = size.height
-            val xStep = width / (temperatures.size - 1)
+            val xStep = width / (rawValues.size - 1)
             val strokePath = Path()
             val fillPath = Path()
 
-            temperatures.forEachIndexed { index, temp ->
+            rawValues.forEachIndexed { index, valItem ->
                 val x = index * xStep
-                val y = height - ((temp - minGraphY) / totalRange * height)
+                val y = height - ((valItem - minGraphY) / totalRange * height)
 
                 if (index == 0) {
                     strokePath.moveTo(x, y)
@@ -181,32 +277,30 @@ fun TemperatureGraphWithAxes(history: List<HourlyWeather>) {
             drawPath(path = strokePath, color = lineColor, style = Stroke(width = 3.dp.toPx()))
         }
 
-        // 2. Y-Axis Overlays (Temperatures)
+        // Y-Axis Overlay
         Text(
-            text = "${maxTemp.toInt()}°",
-            fontSize = 12.sp,
-            modifier = Modifier.align(Alignment.TopStart).padding(top = 8.dp),
+            text = "${maxVal.toInt()}${metric.unit}",
+            fontSize = 11.sp,
+            modifier = Modifier.align(Alignment.TopStart),
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
-            text = "${minTemp.toInt()}°",
-            fontSize = 12.sp,
+            text = "${minVal.toInt()}${metric.unit}",
+            fontSize = 11.sp,
             modifier = Modifier.align(Alignment.BottomStart).padding(bottom = 24.dp),
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        // 3. X-Axis Overlays (Times)
-        // Earliest time recorded today
+        // X-Axis Overlay
         Text(
-            text = history.first().timeString.take(5), // e.g., "08:00"
-            fontSize = 12.sp,
-            modifier = Modifier.align(Alignment.BottomStart).padding(start = 32.dp),
+            text = history.first().timeString.take(5),
+            fontSize = 11.sp,
+            modifier = Modifier.align(Alignment.BottomStart).padding(start = 36.dp),
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        // Latest time recorded today
         Text(
             text = history.last().timeString.take(5),
-            fontSize = 12.sp,
+            fontSize = 11.sp,
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 8.dp),
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -229,8 +323,12 @@ fun HourlyRowItem(data: HourlyWeather) {
         ) {
             Text(text = data.timeString, fontSize = 18.sp, fontWeight = FontWeight.Medium)
             Column(horizontalAlignment = Alignment.End) {
-                Text(text = "${String.format("%.1f", data.avgTemperature)}°C", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                Text(text = "Hum: ${String.format("%.0f", data.avgHumidity)}%", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(text = "${String.format("%.1f", data.avgTemperature)}°C", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "Hum: ${data.avgHumidity.toInt()}% | Pres: ${data.avgPressure.toInt()} hPa",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
