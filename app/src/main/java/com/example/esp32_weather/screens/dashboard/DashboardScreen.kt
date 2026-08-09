@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.esp32_weather.utils.TimeFormatter
 import com.example.esp32_weather.viewmodel.WeatherViewModel
 
 @Composable
@@ -86,7 +87,7 @@ fun HeroCard(temperature: Float, lux: Float) {
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "Updated just now",
+                    text = "Updated just ${TimeFormatter.formatTimestamp(current!!.timestamp)}",
                     color = Color.White.copy(alpha = 0.6f),
                     fontSize = 14.sp
                 )
