@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material3.*
@@ -19,13 +20,13 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.esp32_weather.screens.dashboard.DashboardScreen
 import com.example.esp32_weather.screens.history.HistoryScreen
+import com.example.esp32_weather.screens.rain.RainScreen
 import com.example.esp32_weather.viewmodel.WeatherViewModel
 
 class WeatherApplication : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            // Wraps your app in the default Material 3 styling
             MaterialTheme {
                 MainAppScreen()
             }
@@ -35,11 +36,7 @@ class WeatherApplication : ComponentActivity() {
 
 @Composable
 fun MainAppScreen() {
-    // This remembers which screen you are currently on
     val navController = rememberNavController()
-
-    // We instantiate the ViewModel here so it survives screen changes
-    // and only downloads the Firebase data once
     val weatherViewModel: WeatherViewModel = viewModel()
 
     Scaffold(
@@ -54,7 +51,6 @@ fun MainAppScreen() {
                     selected = currentRoute == "dashboard",
                     onClick = {
                         navController.navigate("dashboard") {
-                            // Prevents building up a massive stack of screens if you tap back and forth
                             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                             launchSingleTop = true
                             restoreState = true
@@ -74,21 +70,31 @@ fun MainAppScreen() {
                         }
                     }
                 )
+
+                // --- NEW RAIN NAVIGATION ITEM ---
+                NavigationBarItem(
+                    icon = { Icon(Icons.Filled.DateRange, contentDescription = "Rainfall") },
+                    label = { Text("Rain") },
+                    selected = currentRoute == "rain",
+                    onClick = {
+                        navController.navigate("rain") {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
             }
         }
     ) { innerPadding ->
-        // This is the container that swaps the screens out when you tap the bottom bar
         NavHost(
             navController = navController,
             startDestination = "dashboard",
             modifier = Modifier.padding(innerPadding)
         ) {
-            composable("dashboard") {
-                DashboardScreen(viewModel = weatherViewModel)
-            }
-            composable("history") {
-                HistoryScreen(viewModel = weatherViewModel)
-            }
+            composable("dashboard") { DashboardScreen(viewModel = weatherViewModel) }
+            composable("history") { HistoryScreen(viewModel = weatherViewModel) }
+            composable("rain") { RainScreen(viewModel = weatherViewModel) }
         }
     }
 }
