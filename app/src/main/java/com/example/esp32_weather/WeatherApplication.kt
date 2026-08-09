@@ -7,7 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import com.example.esp32_weather.screens.WeatherHistory
 import com.example.esp32_weather.ui.theme.Esp32WeatherTheme
 
-class MainActivity : ComponentActivity() {
+class WeatherApplication : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
