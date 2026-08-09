@@ -1,11 +1,13 @@
 package com.example.esp32_weather.screens.history
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -22,44 +24,84 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.esp32_weather.data.model.HourlyWeather
 import com.example.esp32_weather.viewmodel.WeatherViewModel
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun HistoryScreen(viewModel: WeatherViewModel) {
-    val historyList by viewModel.todayHistory.collectAsState()
+    val historyList by viewModel.selectedDateHistory.collectAsState()
+    val selectedDate by viewModel.selectedDate.collectAsState()
+
+    // Format the date (e.g., "Aug 09, 2026")
+    val dateDisplay = selectedDate.format(DateTimeFormatter.ofPattern("MMM dd, yyyy"))
+    val isToday = selectedDate.isEqual(LocalDate.now())
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp)
     ) {
-        Text(
-            text = "Today's Trends",
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 16.dp, top = 24.dp)
-        )
+        // --- Header with Date Navigation Arrows ---
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = { viewModel.previousDay() }) {
+                Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Previous Day")
+            }
+
+            Text(
+                text = "Trends: $dateDisplay",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            // Disable the right arrow if we are already on "Today"
+            IconButton(
+                onClick = { viewModel.nextDay() },
+                enabled = !isToday
+            ) {
+                Icon(
+                    Icons.Default.KeyboardArrowRight,
+                    contentDescription = "Next Day",
+                    tint = if (isToday) Color.Gray else MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
 
         if (historyList.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Waiting for ESP32 hourly data...", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("No data recorded for this date.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
 
-            // 1. The Graph Section
+            // --- The Graph Section with Axes ---
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(200.dp)
+                    .height(240.dp) // Made slightly taller for labels
                     .padding(bottom = 16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                 shape = RoundedCornerShape(16.dp)
             ) {
-                if (historyList.size < 2) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Need at least 2 hours of data to draw a graph.")
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = "Temperature (°C)",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+
+                    if (historyList.size < 2) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("Need at least 2 hours of data.")
+                        }
+                    } else {
+                        TemperatureGraphWithAxes(historyList)
                     }
-                } else {
-                    TemperatureGraph(historyList)
                 }
             }
 
@@ -70,12 +112,11 @@ fun HistoryScreen(viewModel: WeatherViewModel) {
                 modifier = Modifier.padding(bottom = 8.dp)
             )
 
-            // 2. The List Section
+            // --- The List Section ---
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 contentPadding = PaddingValues(bottom = 16.dp)
             ) {
-                // Reverse the list so the newest hour is at the top
                 items(historyList.reversed()) { hourData ->
                     HourlyRowItem(hourData)
                 }
@@ -85,13 +126,11 @@ fun HistoryScreen(viewModel: WeatherViewModel) {
 }
 
 @Composable
-fun TemperatureGraph(history: List<HourlyWeather>) {
-    // Extract temperatures and find the highest and lowest points to scale the graph
+fun TemperatureGraphWithAxes(history: List<HourlyWeather>) {
     val temperatures = history.map { it.avgTemperature }
     val maxTemp = temperatures.maxOrNull() ?: 0f
     val minTemp = temperatures.minOrNull() ?: 0f
 
-    // Add a little padding to the top and bottom of the graph
     val range = (maxTemp - minTemp).coerceAtLeast(1f)
     val maxGraphY = maxTemp + (range * 0.1f)
     val minGraphY = minTemp - (range * 0.1f)
@@ -100,62 +139,76 @@ fun TemperatureGraph(history: List<HourlyWeather>) {
     val lineColor = MaterialTheme.colorScheme.primary
     val gradientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
 
-    Canvas(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        val width = size.width
-        val height = size.height
+    // A Box lets us draw the Canvas in the background, and place Text labels on top
+    Box(modifier = Modifier.fillMaxSize()) {
 
-        // Distance between each point on the X axis
-        val xStep = width / (temperatures.size - 1)
+        // 1. The Canvas Drawing (Padded to make room for text)
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = 32.dp, bottom = 24.dp, top = 8.dp, end = 8.dp)
+        ) {
+            val width = size.width
+            val height = size.height
+            val xStep = width / (temperatures.size - 1)
+            val strokePath = Path()
+            val fillPath = Path()
 
-        val strokePath = Path()
-        val fillPath = Path()
+            temperatures.forEachIndexed { index, temp ->
+                val x = index * xStep
+                val y = height - ((temp - minGraphY) / totalRange * height)
 
-        temperatures.forEachIndexed { index, temp ->
-            val x = index * xStep
-            // Calculate Y position (invert it because Y goes down in Canvas)
-            val y = height - ((temp - minGraphY) / totalRange * height)
+                if (index == 0) {
+                    strokePath.moveTo(x, y)
+                    fillPath.moveTo(x, height)
+                    fillPath.lineTo(x, y)
+                } else {
+                    strokePath.lineTo(x, y)
+                    fillPath.lineTo(x, y)
+                }
 
-            if (index == 0) {
-                strokePath.moveTo(x, y)
-                fillPath.moveTo(x, height) // Start fill from the bottom
-                fillPath.lineTo(x, y)
-            } else {
-                strokePath.lineTo(x, y)
-                fillPath.lineTo(x, y)
+                drawCircle(color = lineColor, radius = 4.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x, y))
             }
 
-            // Draw a dot for each data point
-            drawCircle(
-                color = lineColor,
-                radius = 6.dp.toPx(),
-                center = androidx.compose.ui.geometry.Offset(x, y)
+            fillPath.lineTo(width, height)
+            fillPath.close()
+
+            drawPath(
+                path = fillPath,
+                brush = Brush.verticalGradient(listOf(gradientColor, Color.Transparent), startY = 0f, endY = height),
+                style = Fill
             )
+            drawPath(path = strokePath, color = lineColor, style = Stroke(width = 3.dp.toPx()))
         }
 
-        // Finish the fill path by drawing down to the bottom right, then closing it
-        fillPath.lineTo(width, height)
-        fillPath.close()
-
-        // Draw the soft gradient under the line
-        drawPath(
-            path = fillPath,
-            brush = Brush.verticalGradient(
-                colors = listOf(gradientColor, Color.Transparent),
-                startY = 0f,
-                endY = height
-            ),
-            style = Fill
+        // 2. Y-Axis Overlays (Temperatures)
+        Text(
+            text = "${maxTemp.toInt()}°",
+            fontSize = 12.sp,
+            modifier = Modifier.align(Alignment.TopStart).padding(top = 8.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = "${minTemp.toInt()}°",
+            fontSize = 12.sp,
+            modifier = Modifier.align(Alignment.BottomStart).padding(bottom = 24.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        // Draw the actual temperature line
-        drawPath(
-            path = strokePath,
-            color = lineColor,
-            style = Stroke(width = 3.dp.toPx())
+        // 3. X-Axis Overlays (Times)
+        // Earliest time recorded today
+        Text(
+            text = history.first().timeString.take(5), // e.g., "08:00"
+            fontSize = 12.sp,
+            modifier = Modifier.align(Alignment.BottomStart).padding(start = 32.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        // Latest time recorded today
+        Text(
+            text = history.last().timeString.take(5),
+            fontSize = 12.sp,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 8.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
@@ -174,22 +227,10 @@ fun HourlyRowItem(data: HourlyWeather) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = data.timeString,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Medium
-            )
+            Text(text = data.timeString, fontSize = 18.sp, fontWeight = FontWeight.Medium)
             Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = "${String.format("%.1f", data.avgTemperature)}°C",
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "Hum: ${String.format("%.0f", data.avgHumidity)}%",
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Text(text = "${String.format("%.1f", data.avgTemperature)}°C", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text(text = "Hum: ${String.format("%.0f", data.avgHumidity)}%", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
