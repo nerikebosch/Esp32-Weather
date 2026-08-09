@@ -21,20 +21,20 @@ import androidx.compose.ui.unit.sp
 import com.example.esp32_weather.data.model.HourlyWeather
 import com.example.esp32_weather.utils.TimeFormatter
 import com.example.esp32_weather.viewmodel.WeatherViewModel
+import java.time.Instant
+import java.time.ZoneId
 
 @Composable
 fun DashboardScreen(viewModel: WeatherViewModel) {
     val current by viewModel.currentWeather.collectAsState()
     val sunlightHours by viewModel.sunlightHoursToday.collectAsState()
-
-    // We bring in today's history so we can calculate highs/lows and draw the timeline!
     val todayHistory by viewModel.todayHistory.collectAsState()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .verticalScroll(rememberScrollState()) // Makes the screen scrollable!
+            .verticalScroll(rememberScrollState())
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -46,25 +46,36 @@ fun DashboardScreen(viewModel: WeatherViewModel) {
                 }
             }
         } else {
-            // 1. Hero Card (Now with dynamic colors & weather status)
+            // 1. Hero Card with Inside & Outside Temperatures and Smart Sun Detection
             HeroCard(
-                temperature = current!!.temperature,
+                tempIn = current!!.temperature,
+                tempOut = current!!.tempOut,
                 lux = current!!.lux,
                 timestamp = current!!.timestamp
             )
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 2. High & Low Temperatures Summary
+            // 2. High & Low Temperatures Summary (Inside BME280)
             val highTemp = todayHistory.maxOfOrNull { it.maxTemperature } ?: current!!.temperature
             val lowTemp = todayHistory.minOfOrNull { it.minTemperature } ?: current!!.temperature
 
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("Low: ${String.format("%.1f", lowTemp)}°C", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
-                Text("High: ${String.format("%.1f", highTemp)}°C", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
+                Text(
+                    text = "Low: ${String.format("%.1f", lowTemp)}°C",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = "High: ${String.format("%.1f", highTemp)}°C",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Medium
+                )
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -82,40 +93,50 @@ fun DashboardScreen(viewModel: WeatherViewModel) {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // 4. The New Daylight Spectrum Graph
+            // 4. Daylight Spectrum Ribbon Graph
             LuxTimelineGraph(todayHistory)
 
-            Spacer(modifier = Modifier.height(32.dp)) // Extra padding at the bottom for the nav bar
+            Spacer(modifier = Modifier.height(32.dp))
         }
     }
 }
 
-// --- NEW HELPER: Maps your exact Lux ranges to colors and text! ---
-fun getWeatherStyle(lux: Float): Pair<String, List<Color>> {
+// --- HELPER: Smart Weather Style (Uses Lux + Hour of Day to detect Sunrise vs Sunset) ---
+fun getWeatherStyle(lux: Float, timestamp: Long): Pair<String, List<Color>> {
+    // Extract local hour of the day (0 to 23) from the timestamp
+    val hour = if (timestamp > 0) {
+        Instant.ofEpochSecond(timestamp).atZone(ZoneId.systemDefault()).hour
+    } else 12
+
     return when {
         // Direct Sun / Bright Daylight
-        lux > 10000f -> Pair("Bright & Clear", listOf(Color(0xFF29B6F6), Color(0xFF0288D1))) // Bright Sky Blue
+        lux > 10000f -> Pair("Bright & Clear", listOf(Color(0xFF29B6F6), Color(0xFF0288D1)))
 
         // Overcast / Ambient Daylight
-        lux > 1000f -> Pair("Overcast / Daylight", listOf(Color(0xFF90A4AE), Color(0xFF546E7A))) // Grey-Blue
+        lux > 1000f -> Pair("Overcast / Daylight", listOf(Color(0xFF90A4AE), Color(0xFF546E7A)))
 
-        // Sunrise / Sunset / Heavy Clouds
-        lux > 100f -> Pair("Sunrise / Low Light", listOf(Color(0xFF3F51B5), Color(0xFFFF9800))) // Blue fading to Orange!
+        // Low Light Transition: Check time to distinguish Sunrise vs Sunset!
+        lux > 100f -> {
+            if (hour in 3..11) {
+                Pair("Sunrise / Morning Light", listOf(Color(0xFF3F51B5), Color(0xFFFF9800))) // Blue to Warm Orange
+            } else {
+                Pair("Sunset / Evening Light", listOf(Color(0xFF1A237E), Color(0xFFE65100))) // Deep Blue to Sunset Orange
+            }
+        }
 
         // Nighttime
-        else -> Pair("Nighttime", listOf(Color(0xFF1A237E), Color(0xFF000000))) // Deep Blue to Black
+        else -> Pair("Nighttime", listOf(Color(0xFF1A237E), Color(0xFF000000)))
     }
 }
 
 @Composable
-fun HeroCard(temperature: Float, lux: Float, timestamp: Long) {
-    // We call our new helper function to get the correct text and colors
-    val (statusText, bgColors) = getWeatherStyle(lux)
+fun HeroCard(tempIn: Float, tempOut: Float, lux: Float, timestamp: Long) {
+    val (statusText, bgColors) = getWeatherStyle(lux, timestamp)
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .height(250.dp),
+            .height(280.dp), // Height expanded to easily hold both readings
         shape = RoundedCornerShape(24.dp),
         elevation = CardDefaults.cardElevation(8.dp)
     ) {
@@ -125,24 +146,63 @@ fun HeroCard(temperature: Float, lux: Float, timestamp: Long) {
                 .background(Brush.verticalGradient(bgColors)),
             contentAlignment = Alignment.Center
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                // The status text changes dynamically based on the sun!
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(16.dp)
+            ) {
+                // Weather Status Header
                 Text(
                     text = statusText,
                     color = Color.White.copy(alpha = 0.9f),
-                    fontSize = 22.sp,
+                    fontSize = 20.sp,
                     fontWeight = FontWeight.Medium
                 )
-                Text(
-                    text = "${String.format("%.1f", temperature)}°C",
-                    color = Color.White,
-                    fontSize = 72.sp,
-                    fontWeight = FontWeight.Bold
-                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // --- TEMPERATURE READINGS STACK ---
+                // Outside Temp (Primary Focus)
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = "OUT ",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Text(
+                        text = "${String.format("%.1f", tempOut)}°C",
+                        color = Color.White,
+                        fontSize = 54.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                // Inside Temp (Secondary Focus)
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = "IN ",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                    Text(
+                        text = "${String.format("%.1f", tempIn)}°C",
+                        color = Color.White.copy(alpha = 0.9f),
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Timestamp Footer
                 Text(
                     text = "Updated at ${TimeFormatter.formatTimestamp(timestamp)}",
                     color = Color.White.copy(alpha = 0.6f),
-                    fontSize = 14.sp
+                    fontSize = 13.sp
                 )
             }
         }
@@ -181,7 +241,7 @@ fun getSolidLuxColor(lux: Float): Color {
     }
 }
 
-// --- The Full-Height Daylight Spectrum Timeline ---
+// --- Full-Height Daylight Spectrum Timeline ---
 @Composable
 fun LuxTimelineGraph(history: List<HourlyWeather>) {
     Card(
@@ -216,11 +276,11 @@ fun LuxTimelineGraph(history: List<HourlyWeather>) {
             } else {
                 Column(modifier = Modifier.fillMaxSize()) {
 
-                    // 1. Full-Height Color Spectrum Band
+                    // Full-Height Color Spectrum Band
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .weight(1f) // Fills entire remaining vertical space
+                            .weight(1f)
                             .clip(RoundedCornerShape(8.dp)),
                         horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
@@ -228,7 +288,7 @@ fun LuxTimelineGraph(history: List<HourlyWeather>) {
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .fillMaxHeight() // 100% Full Height!
+                                    .fillMaxHeight()
                                     .background(getSolidLuxColor(hourData.avgLux))
                             )
                         }
@@ -236,13 +296,12 @@ fun LuxTimelineGraph(history: List<HourlyWeather>) {
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // 2. X-Axis: Time Labels Underneath Each Bar
+                    // X-Axis: Time Labels Underneath Each Bar
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         history.forEach { hourData ->
-                            // Formats "14:00:00" down to "14:00"
                             val timeLabel = if (hourData.timeString.length >= 5) {
                                 hourData.timeString.substring(0, 5)
                             } else {
