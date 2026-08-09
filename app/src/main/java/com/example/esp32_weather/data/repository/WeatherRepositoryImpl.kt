@@ -66,4 +66,28 @@ class WeatherRepositoryImpl(
         reference.addValueEventListener(listener)
         awaitClose { reference.removeEventListener(listener) }
     }
+
+    override fun saveRainData(dateString: String, amountMm: Float) {
+        database.getReference("weather/history/rain/$dateString/amountMm").setValue(amountMm)
+    }
+
+    override fun getRainHistory(): Flow<Map<String, Float>> = callbackFlow {
+        val reference = database.getReference("weather/history/rain")
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val rainMap = mutableMapOf<String, Float>()
+                for (child in snapshot.children) {
+                    val dateStr = child.key ?: continue
+                    val amount = child.child("amountMm").getValue(Float::class.java) ?: 0f
+                    rainMap[dateStr] = amount
+                }
+                trySend(rainMap)
+            }
+            override fun onCancelled(error: DatabaseError) {
+                close(error.toException())
+            }
+        }
+        reference.addValueEventListener(listener)
+        awaitClose { reference.removeEventListener(listener) }
+    }
 }

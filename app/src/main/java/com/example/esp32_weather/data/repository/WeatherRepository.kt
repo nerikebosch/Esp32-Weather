@@ -10,4 +10,7 @@ interface WeatherRepository {
 
     // Returns a stream of the history list for a specific date (e.g., "2026-08-09")
     fun getHourlyHistory(dateString: String): Flow<List<HourlyWeather>>
+
+    fun saveRainData(dateString: String, amountMm: Float)
+    fun getRainHistory(): Flow<Map<String, Float>>
 }
