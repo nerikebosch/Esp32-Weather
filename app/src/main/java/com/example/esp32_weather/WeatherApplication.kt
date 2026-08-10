@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -18,6 +19,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.esp32_weather.screens.map.WeatherMapScreen
 import com.example.esp32_weather.screens.dashboard.DashboardScreen
 import com.example.esp32_weather.screens.history.HistoryScreen
 import com.example.esp32_weather.screens.rain.RainScreen
@@ -71,13 +73,26 @@ fun MainAppScreen() {
                     }
                 )
 
-                // --- NEW RAIN NAVIGATION ITEM ---
                 NavigationBarItem(
                     icon = { Icon(Icons.Filled.DateRange, contentDescription = "Rainfall") },
                     label = { Text("Rain") },
                     selected = currentRoute == "rain",
                     onClick = {
                         navController.navigate("rain") {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
+
+                // --- NEW WEATHER MAP NAVIGATION ITEM ---
+                NavigationBarItem(
+                    icon = { Icon(Icons.Filled.Place, contentDescription = "Weather Map") },
+                    label = { Text("Map") },
+                    selected = currentRoute == "map",
+                    onClick = {
+                        navController.navigate("map") {
                             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                             launchSingleTop = true
                             restoreState = true
@@ -95,6 +110,7 @@ fun MainAppScreen() {
             composable("dashboard") { DashboardScreen(viewModel = weatherViewModel) }
             composable("history") { HistoryScreen(viewModel = weatherViewModel) }
             composable("rain") { RainScreen(viewModel = weatherViewModel) }
+            composable("map") { WeatherMapScreen() }
         }
     }
 }
