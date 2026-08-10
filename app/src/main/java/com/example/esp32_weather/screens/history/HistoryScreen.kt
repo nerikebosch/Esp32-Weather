@@ -1,9 +1,11 @@
 package com.example.esp32_weather.screens.history
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
@@ -12,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -26,7 +29,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
 enum class GraphMetric(val label: String, val unit: String, val color: Color) {
-    TEMPERATURE("Temp", "°C", Color(0xFFFF7043)),
+    TEMPERATURE("Temp", "°C", Color(0xFF26A69A)), // Primary color for Outside Temp (Teal)
     HUMIDITY("Humidity", "%", Color(0xFF29B6F6)),
     PRESSURE("Pressure", "hPa", Color(0xFFAB47BC)),
     LUX("Light", "lx", Color(0xFFFFCA28))
@@ -97,12 +100,11 @@ fun HistoryScreen(viewModel: WeatherViewModel) {
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(290.dp),
+                            .height(310.dp), // Slightly taller to fit legend
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                         shape = RoundedCornerShape(16.dp)
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
-                            // Filter Chips Row
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -151,15 +153,18 @@ fun HistoryScreen(viewModel: WeatherViewModel) {
 // --- Daily Summary Highlights Block ---
 @Composable
 fun DailyHighlightsSummary(history: List<HourlyWeather>) {
-    val minTemp = history.minOfOrNull { it.minTemperature } ?: 0f
-    val maxTemp = history.maxOfOrNull { it.maxTemperature } ?: 0f
-    val tempDelta = maxTemp - minTemp
+    // Outside Temp
+    val minTempOut = history.minOfOrNull { it.minTempOut } ?: 0f
+    val maxTempOut = history.maxOfOrNull { it.maxTempOut } ?: 0f
+
+    // Inside Temp
+    val minTempIn = history.minOfOrNull { it.minTemperature } ?: 0f
+    val maxTempIn = history.maxOfOrNull { it.maxTemperature } ?: 0f
 
     val peakLuxHour = history.maxByOrNull { it.avgLux }
-    val avgTemp = history.map { it.avgTemperature }.average().toFloat()
+    val avgTempOut = history.map { it.avgTempOut }.average().toFloat()
     val avgHum = history.map { it.avgHumidity }.average().toFloat()
 
-    // Pressure Trend (Compare first recorded hour vs last recorded hour)
     val firstPressure = history.first().avgPressure
     val lastPressure = history.last().avgPressure
     val pressureDiff = lastPressure - firstPressure
@@ -169,11 +174,10 @@ fun DailyHighlightsSummary(history: List<HourlyWeather>) {
         else -> "Steady ➡"
     }
 
-    // Comfort Score Logic
     val comfortLabel = when {
-        avgTemp in 18.0..25.0 && avgHum in 30.0..60.0 -> "Ideal & Comfortable 😊"
-        avgTemp > 28.0 && avgHum > 65.0 -> "Hot & Humid 💦"
-        avgTemp < 15.0 -> "Crisp & Cold ❄"
+        avgTempOut in 18.0..25.0 && avgHum in 30.0..60.0 -> "Ideal & Comfortable 😊"
+        avgTempOut > 28.0 && avgHum > 65.0 -> "Hot & Humid 💦"
+        avgTempOut < 15.0 -> "Crisp & Cold ❄"
         avgHum < 30.0 -> "Dry Air 🌵"
         else -> "Moderate Weather 🌤"
     }
@@ -188,7 +192,12 @@ fun DailyHighlightsSummary(history: List<HourlyWeather>) {
             Spacer(modifier = Modifier.height(12.dp))
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                SummaryTile(title = "Temp Range", value = "${minTemp.toInt()}° - ${maxTemp.toInt()}°C", subtitle = "Swing: ${String.format("%.1f", tempDelta)}°C")
+                // Updated to show Out as main, and In as subtitle
+                SummaryTile(
+                    title = "Temp Range",
+                    value = "Out: ${minTempOut.toInt()}° - ${maxTempOut.toInt()}°C",
+                    subtitle = "In: ${minTempIn.toInt()}° - ${maxTempIn.toInt()}°C"
+                )
                 SummaryTile(title = "Pressure Trend", value = pressureTrend.split(" ")[0], subtitle = pressureTrend.substringAfter(" "))
             }
 
@@ -215,73 +224,113 @@ fun SummaryTile(title: String, value: String, subtitle: String) {
     }
 }
 
-// --- Dynamic Canvas Multi-Metric Graph ---
+// --- Dynamic Canvas Multi-Metric Graph (Now supports Dual Lines) ---
 @Composable
 fun MultiMetricGraph(history: List<HourlyWeather>, metric: GraphMetric) {
-    val rawValues = history.map {
+    val isTemp = metric == GraphMetric.TEMPERATURE
+    val colorPrimary = metric.color
+    val colorSecondary = Color(0xFFFF7043) // Orange for Inside Temp
+
+    // Primary values (TempOut, Humidity, etc.)
+    val rawValuesPrimary = history.map {
         when (metric) {
-            GraphMetric.TEMPERATURE -> it.avgTemperature
+            GraphMetric.TEMPERATURE -> it.avgTempOut
             GraphMetric.HUMIDITY -> it.avgHumidity
             GraphMetric.PRESSURE -> it.avgPressure
             GraphMetric.LUX -> it.avgLux
         }
     }
 
-    val maxVal = rawValues.maxOrNull() ?: 0f
-    val minVal = rawValues.minOrNull() ?: 0f
+    // Secondary values (Only used if Temp is selected)
+    val rawValuesSecondary = if (isTemp) history.map { it.avgTemperature } else emptyList()
+
+    // Find absolute max and min to scale the graph properly
+    val allValues = rawValuesPrimary + rawValuesSecondary
+    val maxVal = allValues.maxOrNull() ?: 0f
+    val minVal = allValues.minOrNull() ?: 0f
 
     val range = (maxVal - minVal).coerceAtLeast(0.1f)
     val maxGraphY = maxVal + (range * 0.1f)
     val minGraphY = minVal - (range * 0.1f)
     val totalRange = maxGraphY - minGraphY
 
-    val lineColor = metric.color
-    val gradientColor = metric.color.copy(alpha = 0.25f)
-
     Box(modifier = Modifier.fillMaxSize()) {
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 36.dp, bottom = 24.dp, top = 8.dp, end = 8.dp)
+                .padding(start = 36.dp, bottom = 24.dp, top = 24.dp, end = 8.dp)
         ) {
             val width = size.width
             val height = size.height
-            val xStep = width / (rawValues.size - 1)
-            val strokePath = Path()
-            val fillPath = Path()
+            val xStep = width / (history.size - 1)
 
-            rawValues.forEachIndexed { index, valItem ->
-                val x = index * xStep
-                val y = height - ((valItem - minGraphY) / totalRange * height)
+            // --- HELPER FUNCTION TO DRAW A LINE ---
+            fun drawMetricLine(values: List<Float>, lineColor: Color, drawGradient: Boolean) {
+                val strokePath = Path()
+                val fillPath = Path()
 
-                if (index == 0) {
-                    strokePath.moveTo(x, y)
-                    fillPath.moveTo(x, height)
-                    fillPath.lineTo(x, y)
-                } else {
-                    strokePath.lineTo(x, y)
-                    fillPath.lineTo(x, y)
+                values.forEachIndexed { index, valItem ->
+                    val x = index * xStep
+                    val y = height - ((valItem - minGraphY) / totalRange * height)
+
+                    if (index == 0) {
+                        strokePath.moveTo(x, y)
+                        fillPath.moveTo(x, height)
+                        fillPath.lineTo(x, y)
+                    } else {
+                        strokePath.lineTo(x, y)
+                        fillPath.lineTo(x, y)
+                    }
+
+                    drawCircle(color = lineColor, radius = 4.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x, y))
                 }
 
-                drawCircle(color = lineColor, radius = 4.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x, y))
+                if (drawGradient) {
+                    fillPath.lineTo(width, height)
+                    fillPath.close()
+                    drawPath(
+                        path = fillPath,
+                        brush = Brush.verticalGradient(listOf(lineColor.copy(alpha = 0.2f), Color.Transparent), startY = 0f, endY = height),
+                        style = Fill
+                    )
+                }
+                drawPath(path = strokePath, color = lineColor, style = Stroke(width = 3.dp.toPx()))
             }
 
-            fillPath.lineTo(width, height)
-            fillPath.close()
+            // Draw Secondary (Inside) first so it sits in the background
+            if (isTemp) {
+                drawMetricLine(rawValuesSecondary, colorSecondary, drawGradient = false)
+            }
+            // Draw Primary (Outside or Hum/Pres/Lux) on top
+            drawMetricLine(rawValuesPrimary, colorPrimary, drawGradient = true)
+        }
 
-            drawPath(
-                path = fillPath,
-                brush = Brush.verticalGradient(listOf(gradientColor, Color.Transparent), startY = 0f, endY = height),
-                style = Fill
-            )
-            drawPath(path = strokePath, color = lineColor, style = Stroke(width = 3.dp.toPx()))
+        // --- LEGEND OVERLAY (Only shows for Temperature) ---
+        if (isTemp) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(end = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(colorPrimary))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Out", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(colorSecondary))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("In", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         }
 
         // Y-Axis Overlay
         Text(
             text = "${maxVal.toInt()}${metric.unit}",
             fontSize = 11.sp,
-            modifier = Modifier.align(Alignment.TopStart),
+            modifier = Modifier.align(Alignment.TopStart).padding(top = 12.dp),
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
@@ -322,8 +371,31 @@ fun HourlyRowItem(data: HourlyWeather) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(text = data.timeString, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+
             Column(horizontalAlignment = Alignment.End) {
-                Text(text = "${String.format("%.1f", data.avgTemperature)}°C", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                // Out and In Temperatures side-by-side
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = "Out: ${String.format("%.1f", data.avgTempOut)}°C",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF26A69A) // Teal matching the graph
+                    )
+                    Text(
+                        text = " | ",
+                        fontSize = 18.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "In: ${String.format("%.1f", data.avgTemperature)}°C",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFFFF7043) // Orange matching the graph
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(2.dp))
+
                 Text(
                     text = "Hum: ${data.avgHumidity.toInt()}% | Pres: ${data.avgPressure.toInt()} hPa",
                     fontSize = 13.sp,
