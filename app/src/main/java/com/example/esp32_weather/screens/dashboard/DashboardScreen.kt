@@ -56,9 +56,9 @@
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // 2. High & Low Temperatures Summary (Inside BME280)
-                val highTemp = todayHistory.maxOfOrNull { it.maxTemperature } ?: current!!.temperature
-                val lowTemp = todayHistory.minOfOrNull { it.minTemperature } ?: current!!.temperature
+                // 2. High & Low Temperatures Summary (Outside Sensor)
+                val highTemp = todayHistory.maxOfOrNull { it.maxTempOut } ?: current!!.tempOut
+                val lowTemp = todayHistory.minOfOrNull { it.minTempOut } ?: current!!.tempOut
 
                 Row(
                     modifier = Modifier
