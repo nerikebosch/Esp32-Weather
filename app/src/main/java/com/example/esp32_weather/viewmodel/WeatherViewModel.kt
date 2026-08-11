@@ -3,61 +3,166 @@ package com.example.esp32_weather.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.esp32_weather.data.model.CurrentWeather
+import com.example.esp32_weather.data.model.DailyWeatherSummary
 import com.example.esp32_weather.data.model.HourlyWeather
-import com.example.esp32_weather.data.repository.WeatherRepository
 import com.example.esp32_weather.data.repository.WeatherRepositoryImpl
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.*
-import java.text.SimpleDateFormat
+import com.example.esp32_weather.screens.history.HistoryPeriod
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.ValueEventListener
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.time.temporal.TemporalAdjusters
-import java.util.Date
 import java.util.Locale
 
-enum class RainPeriod { WEEK, MONTH, YEAR }
+enum class RainPeriod {
+    WEEK, MONTH, YEAR
+}
 
-data class RainBarItem(val label: String, val amountMm: Float)
+data class RainBarItem(
+    val label: String,
+    val amountMm: Float
+)
 
-class WeatherViewModel(
-    private val repository: WeatherRepository = WeatherRepositoryImpl()
-) : ViewModel() {
+class WeatherViewModel : ViewModel() {
 
-    // --- DASHBOARD & HISTORY ---
+    private val database = FirebaseDatabase.getInstance("https://esp32-weather-f6baa-default-rtdb.europe-west1.firebasedatabase.app").getReference("weather")
+    private val repository = WeatherRepositoryImpl()
+
+    // ====================================================================
+    // 0. BASE DATA FLOWS (Must be declared first!)
+    // ====================================================================
+
+    val selectedPeriod = MutableStateFlow(HistoryPeriod.HOURS_24)
+    private val _hourly24h = MutableStateFlow<List<HourlyWeather>>(emptyList())
+    private val _hourly48h = MutableStateFlow<List<HourlyWeather>>(emptyList())
+    private val _sevenDaySummaries = MutableStateFlow<List<DailyWeatherSummary>>(emptyList())
+
+    init {
+        fetchHistoricalData()
+    }
+
+    // ====================================================================
+    // 1. DASHBOARD SCREEN STATE (Live Weather)
+    // ====================================================================
+
     val currentWeather: StateFlow<CurrentWeather?> = repository.getLiveWeather()
         .stateIn(viewModelScope, SharingStarted.Lazily, null)
 
-    private val todayString = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+    // Now this works perfectly because _hourly24h already exists above!
+    val sunlightHoursToday: StateFlow<String> = _hourly24h.map { todayList ->
+        val sunCount = todayList.count { it.avgLux > 50f }
+        sunCount.toString()
+    }.stateIn(viewModelScope, SharingStarted.Lazily, "0")
 
-    val todayHistory: StateFlow<List<HourlyWeather>> = repository.getHourlyHistory(todayString)
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    val todayHistory: StateFlow<List<HourlyWeather>> get() = _hourly24h
 
-    val sunlightHoursToday: StateFlow<Int> = todayHistory.map { historyList ->
-        historyList.count { it.avgLux > 1000f }
-    }.stateIn(viewModelScope, SharingStarted.Lazily, 0)
 
-    private val _selectedDate = MutableStateFlow(LocalDate.now())
-    val selectedDate: StateFlow<LocalDate> = _selectedDate.asStateFlow()
+    // ====================================================================
+    // 2. HISTORY SCREEN STATE (24h / 48h / 7-Day)
+    // ====================================================================
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val selectedDateHistory: StateFlow<List<HourlyWeather>> = _selectedDate
-        .flatMapLatest { date ->
-            val dateStr = date.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
-            repository.getHourlyHistory(dateStr)
+    val sevenDaySummaries: StateFlow<List<DailyWeatherSummary>> = _sevenDaySummaries
+
+    val selectedDateHistory: StateFlow<List<HourlyWeather>> = combine(
+        selectedPeriod,
+        _hourly24h,
+        _hourly48h
+    ) { period, h24, h48 ->
+        when (period) {
+            HistoryPeriod.HOURS_24 -> h24
+            HistoryPeriod.HOURS_48 -> h48
+            HistoryPeriod.DAYS_7 -> emptyList()
         }
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    fun previousDay() { _selectedDate.value = _selectedDate.value.minusDays(1) }
-    fun nextDay() {
-        if (_selectedDate.value.isBefore(LocalDate.now())) {
-            _selectedDate.value = _selectedDate.value.plusDays(1)
-        }
+    private fun fetchHistoricalData() {
+        val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+        val dayOfWeekFormatter = DateTimeFormatter.ofPattern("EEE", Locale.getDefault())
+        val displayDateFormatter = DateTimeFormatter.ofPattern("MMM dd", Locale.getDefault())
+
+        val today = LocalDate.now()
+        val datesToFetch = (0..6).map { today.minusDays(it.toLong()) }
+
+        database.child("history").child("hourly")
+            .addValueEventListener(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val allFetchedHours = mutableMapOf<LocalDate, List<HourlyWeather>>()
+                    val summaries = mutableListOf<DailyWeatherSummary>()
+
+                    println("FIREBASE DEBUG: Found ${snapshot.childrenCount} total date folders in history/hourly")
+
+                    for (date in datesToFetch) {
+                        val dateKey = date.format(dateFormatter)
+                        val dateNode = snapshot.child(dateKey)
+
+                        val hoursList = mutableListOf<HourlyWeather>()
+
+                        for (hourNode in dateNode.children) {
+                            val item = hourNode.getValue(HourlyWeather::class.java)
+                            if (item != null) {
+                                hoursList.add(item)
+                            } else {
+                                println("FIREBASE DEBUG: Failed to parse hour node: ${hourNode.key}")
+                            }
+                        }
+
+                        println("FIREBASE DEBUG: Fetched ${hoursList.size} hours for date: $dateKey")
+
+                        val sortedHours = hoursList.sortedBy { it.timestamp }
+                        allFetchedHours[date] = sortedHours
+
+                        if (sortedHours.isNotEmpty()) {
+                            val minOut = sortedHours.minOf { it.minTempOut }
+                            val maxOut = sortedHours.maxOf { it.maxTempOut }
+                            val avgHum = sortedHours.map { it.avgHumidity }.average().toFloat()
+
+                            val dayLabel = if (date == today) "Today" else date.format(dayOfWeekFormatter)
+
+                            summaries.add(
+                                DailyWeatherSummary(
+                                    dayOfWeek = dayLabel,
+                                    dateString = date.format(displayDateFormatter),
+                                    minTempOut = minOut,
+                                    maxTempOut = maxOut,
+                                    avgHumidity = avgHum
+                                )
+                            )
+                        }
+                    }
+
+                    _hourly24h.value = allFetchedHours[today] ?: emptyList()
+
+                    val yesterday = today.minusDays(1)
+                    val yesterdayHours = allFetchedHours[yesterday] ?: emptyList()
+                    val todayHours = allFetchedHours[today] ?: emptyList()
+                    _hourly48h.value = (yesterdayHours + todayHours).sortedBy { it.timestamp }
+
+                    _sevenDaySummaries.value = summaries
+                }
+
+                override fun onCancelled(error: DatabaseError) {
+                    // Handle error
+                }
+            })
     }
 
 
-    // --- RAIN TRACKER LOGIC ---
+    // ====================================================================
+    // 3. RAIN SCREEN STATE
+    // ====================================================================
+
+    private val todayString = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+
     private val rainMap = repository.getRainHistory()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyMap())
 
@@ -72,7 +177,6 @@ class WeatherViewModel(
         repository.saveRainData(todayString, amountMm)
     }
 
-    // Process graph bars based on selected Period (Week / Month / Year)
     val rainGraphData: StateFlow<List<RainBarItem>> = combine(
         rainMap,
         selectedRainPeriod,

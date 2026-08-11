@@ -1,19 +1,28 @@
 package com.example.esp32_weather.screens.map
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.UrlTileProvider
 import com.google.maps.android.compose.*
+import kotlinx.coroutines.launch
 import java.net.URL
 
 // --- PASTE YOUR OPENWEATHERMAP API KEY HERE ---
-private const val OPENWEATHER_API_KEY = "YOUR_OPENWEATHER_API_KEY_HERE"
+private const val OPENWEATHER_API_KEY = ""
 
 @Composable
 fun WeatherMapScreen() {
@@ -25,6 +34,8 @@ fun WeatherMapScreen() {
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(southAfrica, 5f)
     }
+
+    val coroutineScope = rememberCoroutineScope()
 
     val weatherTileProvider = remember(currentLayer) {
         object : UrlTileProvider(256, 256) {
@@ -39,32 +50,37 @@ fun WeatherMapScreen() {
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
+        // --- HEADER CONTROLS ---
         Surface(
             modifier = Modifier.fillMaxWidth(),
             color = MaterialTheme.colorScheme.primaryContainer,
-            shadowElevation = 4.dp
+            shadowElevation = 8.dp
         ) {
             Column(
                 modifier = Modifier.padding(12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "Regional Forecast Overlay",
-                    style = MaterialTheme.typography.titleMedium
+                    text = "Live Weather Radar",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Location Jump Buttons
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Button(onClick = {
-                        cameraPositionState.position = CameraPosition.fromLatLngZoom(southAfrica, 5f)
+                        coroutineScope.launch {
+                            cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(southAfrica, 5f))
+                        }
                     }) {
                         Text("South Africa")
                     }
 
                     Button(onClick = {
-                        cameraPositionState.position = CameraPosition.fromLatLngZoom(poland, 5.5f)
+                        coroutineScope.launch {
+                            cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(poland, 5.5f))
+                        }
                     }) {
                         Text("Poland")
                     }
@@ -72,7 +88,6 @@ fun WeatherMapScreen() {
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Layer Toggle Controls (Clouds / Rain / Temp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = currentLayer == "clouds_new",
@@ -93,12 +108,124 @@ fun WeatherMapScreen() {
             }
         }
 
-        GoogleMap(
-            modifier = Modifier.fillMaxSize(),
-            cameraPositionState = cameraPositionState,
-            uiSettings = MapUiSettings(zoomControlsEnabled = true)
+        // --- MAP AND LEGEND OVERLAY ---
+        Box(modifier = Modifier.fillMaxSize()) {
+
+            // 1. Google Map (Hybrid Satellite View)
+            GoogleMap(
+                modifier = Modifier.fillMaxSize(),
+                cameraPositionState = cameraPositionState,
+                properties = MapProperties(mapType = MapType.HYBRID),
+                uiSettings = MapUiSettings(zoomControlsEnabled = false)
+            ) {
+                // Main Weather Overlay
+                TileOverlay(
+                    tileProvider = weatherTileProvider,
+                    transparency = 0f
+                )
+
+                // THE FIX FOR DARKER RAIN:
+                // Stacking a 2nd and 3rd layer specifically for Rain multiplies the color density,
+                // making transparent blue/purple rain clouds significantly darker and richer!
+                if (currentLayer == "precipitation_new") {
+                    TileOverlay(
+                        tileProvider = weatherTileProvider,
+                        transparency = 0f
+                    )
+                    TileOverlay(
+                        tileProvider = weatherTileProvider,
+                        transparency = 0f
+                    )
+                }
+            }
+
+            // 2. Dynamic Legend at the bottom
+            DynamicWeatherLegend(
+                currentLayer = currentLayer,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 16.dp)
+            )
+        }
+    }
+}
+
+// --- DYNAMIC FLOATING LEGEND COMPOSABLE ---
+@Composable
+fun DynamicWeatherLegend(currentLayer: String, modifier: Modifier = Modifier) {
+
+    val (legendTitle, colors, startLabel, midLabel, endLabel) = when (currentLayer) {
+        "temp_new" -> {
+            listOf(
+                "Temperature (°C)",
+                listOf(Color(0xFF8257DB), Color(0xFF20C4E8), Color(0xFFFFF028), Color(0xFFFC8014)),
+                "-30°C", "5°C", "40°C"
+            )
+        }
+        "precipitation_new" -> {
+            listOf(
+                "Rainfall Intensity (mm/h)",
+                // Darkened legend gradient to match the stacked radar overlay
+                listOf(Color(0xFF0077FF), Color(0xFF5A00D6), Color(0xFFD6005A)),
+                "Light", "Moderate", "Heavy"
+            )
+        }
+        else -> {
+            listOf(
+                "Cloud Cover (%)",
+                listOf(Color(0x44FFFFFF), Color(0xAAFFFFFF), Color(0xFF9E9E9E)),
+                "Clear (0%)", "Partly (50%)", "Overcast (100%)"
+            )
+        }
+    }
+
+    val title = legendTitle as String
+    val gradientColors = colors as List<Color>
+    val textStart = startLabel as String
+    val textMid = midLabel as String
+    val textEnd = endLabel as String
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth(0.9f)
+            .height(80.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)),
+        elevation = CardDefaults.cardElevation(8.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.Center
         ) {
-            TileOverlay(tileProvider = weatherTileProvider)
+            Text(
+                text = title,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(12.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Brush.horizontalGradient(gradientColors))
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(text = textStart, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                Text(text = textMid, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                Text(text = textEnd, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+            }
         }
     }
 }
