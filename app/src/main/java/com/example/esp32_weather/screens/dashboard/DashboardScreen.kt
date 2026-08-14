@@ -276,7 +276,7 @@
                 } else {
                     Column(modifier = Modifier.fillMaxSize()) {
 
-                        // Full-Height Color Spectrum Band
+                        // 1. Full-Height Color Spectrum Band
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -294,28 +294,40 @@
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
 
-                        // X-Axis: Time Labels Underneath Each Bar
+                        // 2. Clean X-Axis Milestone Labels (Start, Middle, End)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            history.forEach { hourData ->
-                                val timeLabel = if (hourData.timeString.length >= 5) {
-                                    hourData.timeString.substring(0, 5)
-                                } else {
-                                    hourData.timeString
-                                }
+                            val firstTime = history.firstOrNull()?.timeString?.take(5) ?: "00:00"
+                            val midIndex = history.size / 2
+                            val midTime = if (history.size > 2) history[midIndex].timeString.take(5) else ""
+                            val lastTime = if (history.size > 1) history.last().timeString.take(5) else ""
 
+                            Text(
+                                text = firstTime,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            if (midTime.isNotEmpty()) {
                                 Text(
-                                    text = timeLabel,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.weight(1f),
-                                    textAlign = TextAlign.Center,
-                                    maxLines = 1
+                                    text = midTime,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            if (lastTime.isNotEmpty()) {
+                                Text(
+                                    text = lastTime,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }

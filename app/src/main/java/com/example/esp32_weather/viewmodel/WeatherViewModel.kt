@@ -44,6 +44,7 @@ class WeatherViewModel : ViewModel() {
 
     val selectedPeriod = MutableStateFlow(HistoryPeriod.HOURS_24)
     private val _hourly24h = MutableStateFlow<List<HourlyWeather>>(emptyList())
+    private val _hourlyYesterday = MutableStateFlow<List<HourlyWeather>>(emptyList())
     private val _hourly48h = MutableStateFlow<List<HourlyWeather>>(emptyList())
     private val _sevenDaySummaries = MutableStateFlow<List<DailyWeatherSummary>>(emptyList())
 
@@ -65,6 +66,7 @@ class WeatherViewModel : ViewModel() {
     }.stateIn(viewModelScope, SharingStarted.Lazily, "0")
 
     val todayHistory: StateFlow<List<HourlyWeather>> get() = _hourly24h
+    val yesterdayHistory: StateFlow<List<HourlyWeather>> get() = _hourlyYesterday
 
 
     // ====================================================================
@@ -145,6 +147,7 @@ class WeatherViewModel : ViewModel() {
                     val yesterday = today.minusDays(1)
                     val yesterdayHours = allFetchedHours[yesterday] ?: emptyList()
                     val todayHours = allFetchedHours[today] ?: emptyList()
+                    _hourlyYesterday.value = yesterdayHours
                     _hourly48h.value = (yesterdayHours + todayHours).sortedBy { it.timestamp }
 
                     _sevenDaySummaries.value = summaries
